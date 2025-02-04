@@ -21,7 +21,7 @@ embedding_classification/
 │
 │── src/                 # Source code for the project
 │   ├── x_data_loader.py # Data preprocessing and loading functions
-│   ├── extract_wav2vec2.py      # Embedding extraction methods
+│   ├── extract_wav2vec2.py # Embedding extraction methods
 │   ├── classifier.py    # Classification logic
 │   ├── utils.py         # Helper functions
 │
