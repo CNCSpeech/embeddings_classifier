@@ -1,3 +1,5 @@
+import sys
+import os
 from tqdm.auto import tqdm
 import pandas as pd
 import torch
@@ -5,133 +7,119 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchsummary import summary
+import yaml
 
-from audio_dataset import AudioDataset
-from embbedding_mlp import EmbeddingMLP
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-if __name__ == "__main__": #TODO refactor into a function
+from models.embedding_mlp import EmbeddingMLP
+from src.audio_dataloader import AudioDataset
+
+if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # assuming that the embeddings have already been extracted...
-    # Create the training DataLoader
-    train_csv_path = "/home/aleph/tesis/classifier/train.csv"
-    train_dataset = AudioDataset(train_csv_path, split='train')
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=2)  # DataLoader with batching and shuffling
+    base_path = path = os.getcwd()
+    config_path = os.path.join(base_path, "configs", "config.yaml")
+    with open(config_path, 'r', encoding="utf-8") as f:
+        config = yaml.safe_load(f)
 
-    # Create the validation DataLoader
-    val_csv_path = "/home/aleph/tesis/classifier/val.csv"
-    val_dataset = AudioDataset(val_csv_path, split='val')
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=2)
+    db_path = os.path.join(base_path, "data", config["project"]["name"], "db.csv")
+    embeddings_path = os.path.join(base_path, "data", config["project"]["name"], "audio_embeddings")
 
-    # Create the testing DataLoader
-    test_csv_path = "/home/aleph/tesis/classifier/test.csv"
-    test_dataset = AudioDataset(test_csv_path, split='test')
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=2) 
+    # Datasets & Loaders
+    train_dataset = AudioDataset(db_path, split='train', embeddings_folder=embeddings_path)
+    val_dataset = AudioDataset(db_path, split='val', embeddings_folder=embeddings_path)
 
-    # Define the model parameters
-    input_dim = 768  # Single 768-dimensional input
-    hidden_dim = 128  # Hidden dimension for dense layers
-    dropout_prob = 0.5  # Dropout probability
-    num_layers = 12  # Number of layers in the Wav2Vec2 model
+    batch_size = 32  # Training batch size
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
-    # Instantiate the EmbeddingMLP model
-    mlp = EmbeddingMLP(input_dim, hidden_dim, dropout_prob, num_layers)
-    mlp.to(device)  # Move the model to the device
+    # Model Parameters
+    input_dim = 768
+    hidden_dim = 128
+    dropout_prob = 0.3
+    num_layers = 13
+    num_classes = 1  # Binary classification (0 or 1)
 
-    # Instantiate the EmbeddingMLP model
-    print(summary(mlp, input_size=(12,768)))
+    # Initialize Model
+    mlp = EmbeddingMLP(input_dim, hidden_dim, dropout_prob, num_layers, num_classes).to(device)
+    print(summary(mlp, input_size=(13, 768)))
 
-    # Number of epochs and batch size
-    num_epochs = 5 # Number of training epochs
-    batch_size = 32  # Batch size for training
-
-    # DataLoader for training and validation
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)  # Ensure batch size and shuffle
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)  # No shuffle for validation
-
-    # define loss and optimizer
-    loss_fn = nn.CrossEntropyLoss()  # Loss function for classification
+    # Training Configuration
+    num_epochs = 1000
+    loss_fn = nn.BCEWithLogitsLoss()  # Binary classification loss
     optimizer = optim.Adam(mlp.parameters(), lr=1e-4)
-    # uncomment for L2 regularization
-    # optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-4, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)  # Reduce LR every 10 epochs
 
-    # Track training and validation loss
+    # Track Loss
     train_losses = []
     val_losses = []
+    best_val_loss = float('inf')
+    worst_val_loss = float('-inf')  # Track the worst loss
+    patience = 20
+    no_improvement_count = 0
 
-    # For early stopping
-    best_val_loss = float('inf')  # To track the best validation loss
-    patience = 20  # Patience for early stopping
-    no_improvement_count = 0  # Counter for epochs without improvement
-
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)  # Decay LR every 10 epochs
-
+    # Training Loop
     for epoch in range(num_epochs):
-        # Training phase with progress bar
-        mlp.train()  # Set model to training mode
-        train_loss = 0.0  # Initialize the training loss
-        
-        # Use tqdm for progress tracking
+        mlp.train()
+        train_loss = 0.0
         with tqdm(total=len(train_loader), desc=f"Epoch {epoch + 1}/{num_epochs}") as pbar:
             for inputs, targets in train_loader:
-                inputs = inputs.to(device)  # Move inputs to the GPU
-                targets = targets.to(device)  # Move targets to the GPU
+                inputs, targets = inputs.to(device), targets.to(device)
 
-                optimizer.zero_grad()  # Zero out the gradients
-                
-                outputs = mlp(inputs)  # Forward pass
-                loss = loss_fn(outputs, targets)  # Compute the loss
-                loss.backward()  # Backpropagation
-                
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(mlp.parameters(), 1.0)  # Adjust value if needed
-                
-                optimizer.step()  # Update the weights
-                
-                train_loss += loss.item()  # Accumulate the loss
-                
-                pbar.update(1)  # Update the progress bar
+                targets = targets.view(-1, 1)  # Reshape targets to match output shape
 
-        train_loss /= len(train_loader)  # Average loss over all batches
-        train_losses.append(train_loss)  # Save the training loss
+                optimizer.zero_grad()
+                outputs = mlp(inputs)  # Raw logits
 
-        # Validation phase
-        mlp.eval()  # Set model to evaluation mode
-        val_loss = 0.0  # Initialize the validation loss
+                # Compute loss correctly
+                loss = loss_fn(outputs, targets)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(mlp.parameters(), 1.0)
+                optimizer.step()
 
+                train_loss += loss.item()
+                pbar.update(1)
+
+        train_loss /= len(train_loader)
+        train_losses.append(train_loss)
+
+        # Validation
+        mlp.eval()
+        val_loss = 0.0
         with torch.no_grad():
             for inputs, targets in val_loader:
-                inputs = inputs.to(device)  # Move inputs to the GPU
-                targets = targets.to(device)  # Move targets to the GPU
+                inputs, targets = inputs.to(device), targets.to(device)
+                targets = targets.view(-1, 1)  # Reshape targets to match output shape
+                outputs = mlp(inputs)
+                loss = loss_fn(outputs, targets)
+                val_loss += loss.item()
 
-                outputs = mlp(inputs)  # Forward pass
-                loss = loss_fn(outputs, targets)  # Calculate loss
-                val_loss += loss.item()  # Accumulate the validation loss
-
-        val_loss /= len(val_loader)  # Average validation loss over all batches
+        val_loss /= len(val_loader)
         val_losses.append(val_loss)
 
-        print(f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
-        # scheduler.step() # Step the scheduler
+        print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
-        # Check for improvement
+        # Save Best Model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(mlp.state_dict(), "best_model.pth")  # Save the best model
-            no_improvement_count = 0  # Reset counter
+            #save into /home/aleph/embbedings_classifier/models/checkpoints
+            torch.save(mlp.state_dict(), os.path.join(base_path, "models", "checkpoints", "audio_mlp_best_model.pth"))
+            no_improvement_count = 0  # Reset early stopping counter
         else:
             no_improvement_count += 1  # Increment counter if no improvement
 
-        # Early stopping check
+        # Save checkpoint every epoch 10 epochs
+        if epoch % 10 == 0:
+            torch.save(mlp.state_dict(),  os.path.join(base_path, "models", "checkpoints", f"audio_mlp_checkpoint_{epoch}.pth"))
+
+        # Early Stopping
         if no_improvement_count >= patience:
             print(f"Stopping early after {epoch + 1} epochs due to no improvement in validation loss.")
             break
 
-        # Save the best model based on validation loss
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            # Save the model (optional)
-            torch.save(mlp.state_dict(), "worst_model.pth")
-        # save train and val losses to csv
-        losses = pd.DataFrame({'train_loss': train_losses, 'val_loss': val_losses})
-        losses.to_csv('losses.csv', index=False)
+        # Step Learning Rate Scheduler
+        scheduler.step()
+
+    # Save Train & Validation Loss History
+    losses = pd.DataFrame({'train_loss': train_losses, 'val_loss': val_losses})
+    losses.to_csv(os.path.join(base_path, "models", "checkpoints", 'losses.csv'), index=False)

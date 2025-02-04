@@ -4,6 +4,7 @@ import torch
 from tqdm.auto import tqdm
 from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2Model, Wav2Vec2Config
 import librosa
+import yaml
 
 def extract_wav2vec_embeddings(input_dir, output_dir, model_name='facebook/wav2vec2-base'):
     """
@@ -22,9 +23,9 @@ def extract_wav2vec_embeddings(input_dir, output_dir, model_name='facebook/wav2v
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Load Wav2Vec2 model and feature extractor
-    config = Wav2Vec2Config.from_pretrained(model_name, output_hidden_states=True)
+    model_config = Wav2Vec2Config.from_pretrained(model_name, output_hidden_states=True)
     feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
-    model = Wav2Vec2Model(config).to(device)
+    model = Wav2Vec2Model(model_config).to(device)
 
     file_count = sum(len([file for file in files if file.endswith('.wav')]) for _, _, files in os.walk(input_dir))  # Get the number of .wav files
     with tqdm(total=file_count) as pbar:
@@ -49,11 +50,8 @@ def extract_wav2vec_embeddings(input_dir, output_dir, model_name='facebook/wav2v
                     # Convert to NumPy and save
                     embeddings = all_layer_embeddings.squeeze().detach().cpu().numpy()
                     file_name = os.path.splitext(file)[0]
-                    subfolder = os.path.basename(root)  # Extract subfolder name
-                    
-                    save_path = os.path.join(output_dir, subfolder)
-                    os.makedirs(save_path, exist_ok=True)
-                    np.save(os.path.join(save_path, f"{file_name}.npy"), embeddings)
+                    os.makedirs(output_dir, exist_ok=True)
+                    np.save(os.path.join(output_dir, f"{file_name}.npy"), embeddings)
 
                     # Free memory
                     del embeddings
@@ -67,6 +65,12 @@ def extract_wav2vec_embeddings(input_dir, output_dir, model_name='facebook/wav2v
 
 
 if __name__ == '__main__':
-    path_to_audios = "datasets/arequipa/audio"
-    out_dir = "datasets/arequipa/audio_embeddings"
+    # Perform embeddings extraction
+    base_path = path = os.getcwd()
+    config_path = os.path.join(base_path, "configs", "config.yaml")
+    with open(config_path, 'r', encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    path_to_audios = os.path.join(base_path, "data", config["project"]["name"], "audio")
+    out_dir = os.path.join(base_path, "data", config["project"]["name"], "audio_embeddings")
     extract_wav2vec_embeddings(path_to_audios, out_dir)

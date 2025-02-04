@@ -14,7 +14,7 @@ class WeightedAverage(torch.nn.Module):
         return torch.sum(x_weighted, dim=1)
 
 class EmbeddingMLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, dropout_prob, num_layers):
+    def __init__(self, input_dim, hidden_dim, dropout_prob, num_layers, num_classes):
         super(EmbeddingMLP, self).__init__()
 
         # add a weighted average layer
@@ -35,7 +35,7 @@ class EmbeddingMLP(nn.Module):
         )
 
         # Final dense layer for group score prediction
-        self.output_layer = nn.Linear(hidden_dim, 1)  # Linear layer to predict group score
+        self.output_layer = nn.Linear(hidden_dim, num_classes) # 
 
     def forward(self, x):
         # Apply the weighted average to combine 12 layers into 1
@@ -58,3 +58,4 @@ class EmbeddingMLP(nn.Module):
 # hidden_dim = 128  # Hidden dimension for dense layers
 # dropout_prob = 0.6  # Dropout probability
 # num_layers = 13  # Number of layers in the Wav2Vec2 model
+# num_classes = 1  # it means 2 classes... 0 and 1
