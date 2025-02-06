@@ -4,7 +4,11 @@ import torch
 from tqdm.auto import tqdm
 from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2Model, Wav2Vec2Config
 import librosa
-import yaml
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from src.utils.config import get_config
+
 
 def extract_wav2vec_embeddings(input_dir, output_dir, model_name='facebook/wav2vec2-base'):
     """
@@ -66,11 +70,5 @@ def extract_wav2vec_embeddings(input_dir, output_dir, model_name='facebook/wav2v
 
 if __name__ == '__main__':
     # Perform embeddings extraction
-    base_path = path = os.getcwd()
-    config_path = os.path.join(base_path, "configs", "config.yaml")
-    with open(config_path, 'r', encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-
-    path_to_audios = os.path.join(base_path, "data", config["project"]["name"], "audio")
-    out_dir = os.path.join(base_path, "data", config["project"]["name"], "audio_embeddings")
-    extract_wav2vec_embeddings(path_to_audios, out_dir)
+    config = get_config()
+    extract_wav2vec_embeddings(config.data.audio_path, config.data.audio_embeddings_path)

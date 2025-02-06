@@ -7,46 +7,43 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchsummary import summary
-import yaml
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models.embedding_mlp import EmbeddingMLP
 from src.audio_dataloader import AudioDataset
+from src.utils.config import get_config
+
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    base_path = path = os.getcwd()
-    config_path = os.path.join(base_path, "configs", "config.yaml")
-    with open(config_path, 'r', encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = get_config()
+    train_dataset = AudioDataset(config.data.train_data_path, split='train', embeddings_folder = config.data.audio_embeddings_path)
+    train_loader = DataLoader(train_dataset, 
+                              batch_size=config.training.batch_size, 
+                              shuffle=config.data.shuffle, 
+                              num_workers=config.data.num_workers)  # DataLoader with batching and shuffling
 
-    db_path = os.path.join(base_path, "data", config["project"]["name"], "db.csv")
-    embeddings_path = os.path.join(base_path, "data", config["project"]["name"], "audio_embeddings")
-
-    # Datasets & Loaders
-    train_dataset = AudioDataset(db_path, split='train', embeddings_folder=embeddings_path)
-    val_dataset = AudioDataset(db_path, split='val', embeddings_folder=embeddings_path)
-
-    batch_size = 32  # Training batch size
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
-
-    # Model Parameters
-    input_dim = 768
-    hidden_dim = 128
-    dropout_prob = 0.3
-    num_layers = 13
-    num_classes = 1  # Binary classification (0 or 1)
+    # Create the validation DataLoader}
+    val_dataset = AudioDataset(config.data.val_data_path, split='val', embeddings_folder = config.data.audio_embeddings_path)
+    val_loader = DataLoader(val_dataset, 
+                            batch_size=config.training.batch_size, 
+                            shuffle=config.data.shuffle, 
+                            num_workers=config.data.num_workers)
 
     # Initialize Model
-    mlp = EmbeddingMLP(input_dim, hidden_dim, dropout_prob, num_layers, num_classes).to(device)
-    print(summary(mlp, input_size=(13, 768)))
+    mlp = EmbeddingMLP(config.training.input_dim, 
+                       config.training.hidden_dim, 
+                       config.training.dropout_prob, 
+                       config.training.num_layers, 
+                       config.model.num_classes).to(device)
+    print(summary(mlp, input_size=(config.training.num_layers, config.training.input_dim)))
 
     # Training Configuration
-    num_epochs = 1000
-    loss_fn = nn.BCEWithLogitsLoss()  # Binary classification loss
+    num_epochs = config.training.num_epochs
+    loss_fn = nn.BCEWithLogitsLoss() if config.model.num_classes == 1 else nn.CrossEntropyLoss()
     optimizer = optim.Adam(mlp.parameters(), lr=1e-4)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)  # Reduce LR every 10 epochs
 

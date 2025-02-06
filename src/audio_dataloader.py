@@ -2,13 +2,15 @@
 import os
 import numpy as np
 import pandas as pd
+import sys
 
 # torch
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-import yaml
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from src.utils.config import get_config
 
 # Custom dataset to read embeddings and group (condition) from a CSV
 class AudioDataset(Dataset):
@@ -57,28 +59,28 @@ class AudioDataset(Dataset):
 
 if __name__ == "__main__":
     # Test the training DataLoader
-    base_path = path = os.getcwd()
-    config_path = os.path.join(base_path, "configs", "config.yaml")
-    with open(config_path, 'r', encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    # Get config instance
+    config = get_config()
 
-    db_path = os.path.join(base_path, "data", config["project"]["name"], "db.csv")
-    embeddings_path = os.path.join(base_path, "data", config["project"]["name"], "audio_embeddings")
-
-    batch_size = config["training"]["batch_size"]
-    shuffle = config["data"]["shuffle"]
-    num_workers = config["data"]["num_workers"]
-
-    train_dataset = AudioDataset(db_path, split='train', embeddings_folder = embeddings_path)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)  # DataLoader with batching and shuffling
+    train_dataset = AudioDataset(config.data.train_data_path, split='train', embeddings_folder = config.data.audio_embeddings_path)
+    train_loader = DataLoader(train_dataset, 
+                              batch_size=config.training.batch_size, 
+                              shuffle=config.data.shuffle, 
+                              num_workers=config.data.num_workers)  # DataLoader with batching and shuffling
 
     # Create the validation DataLoader}
-    val_dataset = AudioDataset(db_path, split='val', embeddings_folder = embeddings_path)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+    val_dataset = AudioDataset(config.data.val_data_path, split='val', embeddings_folder = config.data.audio_embeddings_path)
+    val_loader = DataLoader(val_dataset, 
+                            batch_size=config.training.batch_size, 
+                            shuffle=config.data.shuffle, 
+                            num_workers=config.data.num_workers)
 
     # Create the testing DataLoader
-    test_dataset = AudioDataset(db_path, split='test',embeddings_folder = embeddings_path)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+    test_dataset = AudioDataset(config.data.test_data_path, split='test',embeddings_folder = config.data.audio_embeddings_path)
+    test_loader = DataLoader(test_dataset, 
+                            batch_size=config.training.batch_size, 
+                            shuffle=config.data.shuffle, 
+                            num_workers=config.data.num_workers)
 
     # Print the number of samples in each split
     print(f"Number of training samples: {len(train_dataset)}")
